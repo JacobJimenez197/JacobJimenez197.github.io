@@ -132,7 +132,7 @@ namespace PlataformaAPI.Controllers
         public async Task<IActionResult> GetUser(int id)
         {
             var user = await _context.Users
-                .Include(u => u.Role)  
+                .Include(u => u.Role)
                 .Where(u => u.Id == id)
                 .Select(u => new
                 {
@@ -141,7 +141,7 @@ namespace PlataformaAPI.Controllers
                     u.Email,
                     u.UserName,
                     RoleId = u.RoleId,
-                    RoleName = u.Role.Name,  
+                    RoleName = u.Role.Name,
                     u.Matricula,
                     u.CreatedAt,
                     u.UpdatedAt
@@ -155,6 +155,6 @@ namespace PlataformaAPI.Controllers
 
             return Ok(user);
         }
+        
     }
-    
 }

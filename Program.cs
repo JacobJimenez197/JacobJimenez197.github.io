@@ -1,100 +1,58 @@
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using PlataformaAPI;
 using PlataformaAPI.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+ConfigureFirebase(builder);
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header using the Bearer scheme",
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer"
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        }
-    });
-});
+ConfigureSwagger(builder);
 
-// Database Context
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"),
+    o => o.EnableRetryOnFailure()));
 
-// Identity
-builder.Services.AddIdentity<User, Role>()
-    .AddEntityFrameworkStores<AppDbContext>()
-    .AddDefaultTokenProviders();
-
-// Authentication
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+builder.Services.AddIdentity<User, Role>(options => {
+    options.Password.RequiredLength = 8;
+    options.User.RequireUniqueEmail = true;
 })
-.AddJwtBearer(options =>
+.AddEntityFrameworkStores<AppDbContext>()
+.AddDefaultTokenProviders();
+
+ConfigureJwtAuthentication(builder);
+
+builder.Services.AddCors(options =>
 {
-    options.SaveToken = true;
-    options.RequireHttpsMetadata = false;
-    options.TokenValidationParameters = new TokenValidationParameters()
+    options.AddDefaultPolicy(builder =>
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidAudience = builder.Configuration["JWT:ValidAudience"],
-        ValidIssuer = builder.Configuration["JWT:ValidIssuer"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["JWT:Secret"]))
-    };
+        builder.AllowAnyOrigin()
+               .AllowAnyMethod()
+               .AllowAnyHeader();
+    });
 });
-
-// Authorization
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("RequireAdminRole", policy => policy.RequireRole("Admin"));
-});
-
-// CORS (configura según tus necesidades)
-builder.Services.AddCors();
 
 var app = builder.Build();
 
-// Initialize database
-using (var scope = app.Services.CreateScope())
-{
-    var services = scope.ServiceProvider;
+app.Use(async (context, next) => {
     try
     {
-        var context = services.GetRequiredService<AppDbContext>();
-        var userManager = services.GetRequiredService<UserManager<User>>();
-        var roleManager = services.GetRequiredService<RoleManager<Role>>();
-
-        await DbInitializer.Initialize(context, userManager, roleManager);
+        await next();
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Error inicializando la base de datos");
+        Console.WriteLine($"ERROR: {ex}");
+        context.Response.StatusCode = 500;
+        await context.Response.WriteAsync("Error interno del servidor");
     }
-}
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -102,13 +60,74 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
 app.UseRouting();
-app.UseCors();
-
 app.UseAuthentication();
 app.UseAuthorization();
-
+app.UseHttpsRedirection(); 
 app.MapControllers();
-
+InitializeDatabase(app);
+app.UseCors();
 app.Run();
+
+void ConfigureFirebase(WebApplicationBuilder builder)
+{
+    try
+    {
+        var credential = GoogleCredential.FromFile("firebase-config.json");
+        FirebaseApp.Create(new AppOptions()
+        {
+            Credential = credential,
+            ProjectId = "plataformalaboratorio-77da5"
+        });
+        Console.WriteLine("Firebase configurado correctamente");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"ERROR Firebase: {ex}");
+    }
+}
+
+void ConfigureSwagger(WebApplicationBuilder builder)
+{
+    builder.Services.AddSwaggerGen(c => {
+        c.SwaggerDoc("v1", new OpenApiInfo { Title = "Plataforma API", Version = "v1" });
+        c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer"
+        });
+    });
+}
+
+void ConfigureJwtAuthentication(WebApplicationBuilder builder)
+{
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options => {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["JWT:ValidIssuer"],
+            ValidAudience = builder.Configuration["JWT:ValidAudience"],
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["JWT:Secret"]))
+        };
+    });
+}
+
+void InitializeDatabase(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Database.Migrate();
+        Console.WriteLine("Base de datos inicializada");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"ERROR BD: {ex}");
+    }
+}

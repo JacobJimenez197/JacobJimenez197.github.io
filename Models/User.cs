@@ -60,4 +60,20 @@ namespace PlataformaAPI.Models
         [StringLength(100, MinimumLength = 6)]
         public string? NewPassword { get; set; }
     }
+    public class GoogleAuthRequest
+    {
+        public string? Token { get; set; } 
+    }
+    public class AuthResponse
+    {
+        public string Token { get; set; }
+        public UserDto User { get; set; }
+    }
+
+    public class UserDto
+    {
+        public string Email { get; set; }
+        public string Name { get; set; }
+        public string Role { get; set; }
+    }
 }
